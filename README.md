@@ -5,6 +5,10 @@ Globalist is an attempt to ease the distribution of git repos, away from central
 
 Globalist stands for "Global List" and aims at replacing any EtherPads of more than transient value.
 
+It grew out of [this][1] discussion
+
 Globalist is also meant to evolve into an experimental distributed asynchronous wiki facility, for example when the central wiki of a conference succumbs to a DDos on the 0th day ;-)
 
 Nodes can come and go, and network topology only depends on the peers entries in the nodes' config files. Changes that are merged by one's peers propagate by diffusion.
+
+[1]:  [http://j7652k4sod2azfu6.onion/p/cloudflare-tor]

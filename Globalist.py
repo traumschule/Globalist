@@ -192,6 +192,7 @@ if __name__=='__main__':
 
     if options.o_clone:
         clone(config)
+        exit(1)
 
     # It's either pull or serve. It's no problem running pull while the
     # server is up.
