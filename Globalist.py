@@ -17,7 +17,7 @@
 #    it is a git server that listens on <your-identifier>.onion:9418
 # c) Globalist.py creates a bare git, which you may use to push and pull your own changes.
 
-__version__ = "0.0.0"
+__version__ = "0.0.1"
 
 import ConfigParser as cp
 import optparse as op
@@ -61,6 +61,8 @@ from stem.control import Controller
 # [network]
 # peers = example7abcdefgh.onion, example8abcdefgh.onion
 
+CONTROLPORT = 9151
+
 def run_server(config, localport = 9418):
     print "Running git server on %s:9418" % config.get('onion', 'hostname')
     print "You can now hand out this onion to prospective peers."
@@ -74,45 +76,44 @@ def run_server(config, localport = 9418):
     print output
     # then background this process
 
-def makeonion(config, options):
-    with Controller.from_port(port = 9151) as controller:
-        # stem docs say: provide the password here if you set one:
-        controller.authenticate()
+def makeonion(controller, config, options):
+    # stem docs say: provide the password here if you set one:
+    controller.authenticate()
+    
+    onion = None
 
-        onion = None
+    if config.has_section('onion'):
+        print "Attempting to use saved onion identity"
+        (keytype,key) = config.get('onion', 'key').split(':',1)
+        onion = controller.create_ephemeral_hidden_service(ports={9418: options.a_localport}, discard_key=True, await_publication=options.o_ap, key_type=keytype, key_content=key)
+    else:
+        print "I'm afraid we don't have an identity yet, creating one"
+        onion = controller.create_ephemeral_hidden_service(ports={9418: options.a_localport}, discard_key=False, await_publication=options.o_ap)
 
-        if config.has_section('onion'):
-            print "Attempting to use saved onion identity"
-            (keytype,key) = config.get('onion', 'key').split(':',1)
-            onion = controller.create_ephemeral_hidden_service(ports={9418: options.a_localport}, discard_key=True, await_publication=options.o_ap, key_type=keytype, key_content=key)
-        else:
-            print "I'm afraid we don't have an identity yet, creating one"
-            onion = controller.create_ephemeral_hidden_service(ports={9418: options.a_localport}, discard_key=False, await_publication=options.o_ap)
+    # print onion
+    print "Tor controller says Onion OK"
 
-        # print onion
-        print "Tor controller says Onion OK"
-
-        if not onion.is_ok():
-            raise Exception('Failed to publish onion.')
-        else:
-            for o in onion:
-                if o != "OK":
-                    k, v = o.split('=', 1)
-                    # we only request the key if the service is new
-                    if k == "PrivateKey":
-                        try:
-                            config.add_section('onion')
-                        except cp.DuplicateSectionError, e:
-                            pass
-                        config.set('onion', 'key', v)
-                        config.write(open('repo.cfg', 'w'))
-                    if k == "ServiceID":
-                        try:
-                            config.add_section('onion')
-                        except cp.DuplicateSectionError, e:
-                            pass
-                        config.set('onion', 'hostname', v)
-                        config.write(open('repo.cfg', 'w'))
+    if not onion.is_ok():
+        raise Exception('Failed to publish onion.')
+    else:
+        for o in onion:
+            if o != "OK":
+                k, v = o.split('=', 1)
+                # we only request the key if the service is new
+                if k == "PrivateKey":
+                    try:
+                        config.add_section('onion')
+                    except cp.DuplicateSectionError, e:
+                        pass
+                    config.set('onion', 'key', v)
+                    config.write(open('repo.cfg', 'w'))
+                if k == "ServiceID":
+                    try:
+                        config.add_section('onion')
+                    except cp.DuplicateSectionError, e:
+                        pass
+                    config.set('onion', 'hostname', v)
+                    config.write(open('repo.cfg', 'w'))
 
 def getpeers(config):
     if config.has_section('network'):
@@ -196,6 +197,7 @@ if __name__=='__main__':
     if options.o_pull:
         pull(config)
     else:
-        makeonion(config, options)
+        controller = Controller.from_port(port = CONTROLPORT)
+        makeonion(controller, config, options)
         run_server(config, localport = options.a_localport)
-
+        controller.close()
