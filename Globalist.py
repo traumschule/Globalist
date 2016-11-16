@@ -15,7 +15,7 @@
 # a) Run Tor.
 # b) Run the server in the background and schedule a job for pulling from peers.
 #    it is a git server that listens on <your-identifier>.onion:9418
-# c) Globalist.py creates a bare git, which you may use to push and pull your own changes.
+# c) Globalist.py creates a git, which you may use to push and pull your own changes.
 
 __version__ = "0.0.1"
 
@@ -34,7 +34,7 @@ from stem.control import Controller
 # Put a configuration file repo.cfg listing some peers. Done.
 #
 # Initialize:
-#  Either a) git init --bare repo.git/
+#  Either a) git init repo/
 #    $ python Globalist.py -i
 #  or     b) torsocks git clone git://example7abcdefgh.onion
 #    $ python Globalist.py -c
@@ -67,11 +67,11 @@ def run_server(config, localport = 9418):
     print "Running git server on %s:9418" % config.get('onion', 'hostname')
     print "You can now hand out this onion to prospective peers."
     print "It will be re-used anytime Globalist starts in this directory."
-    subprocess.Popen(["touch",  os.path.abspath(os.path.join("repo.git","git-daemon-export-ok")) ]).wait()
+    subprocess.Popen(["touch",  os.path.abspath(os.path.join("repo",".git","git-daemon-export-ok")) ]).wait()
     gitdaemon = subprocess.Popen(["git", "daemon", "--base-path=%s" % os.path.abspath("."),
                                   "--reuseaddr", "--verbose",
                                   "--listen=127.0.0.1", "--port=%d" % localport,
-                                  os.path.abspath("repo.git")])
+                                  os.path.abspath("repo")])
     output = gitdaemon.communicate()[0]
     print output
     # then background this process
@@ -135,16 +135,16 @@ def clone(config):
     peers = getpeers(config)
 
     # FIXME: when the first fails, we should move on to the next
-    cloneproc = subprocess.Popen(["torsocks", "git", "clone", "--bare", "git://%s.onion/repo.git" % peers[0], "repo.git"])
+    cloneproc = subprocess.Popen(["torsocks", "git", "clone", "git://%s.onion/repo" % peers[0], "repo"])
     if cloneproc.wait() != 0:
         print "Error cloning, exiting."
         exit(-1)
     else:
-        subprocess.Popen(["touch",  os.path.abspath(os.path.join("repo.git","git-daemon-export-ok")) ]).wait()
+        subprocess.Popen(["touch",  os.path.abspath(os.path.join("repo",".git","git-daemon-export-ok")) ]).wait()
 
     processes = []
     for peer in peers[1:]:
-        processes.append([peer, subprocess.Popen(["torsocks", "git", "-C", os.path.abspath("repo.git"), "pull", "git://%s.onion/repo.git" % peer])])
+        processes.append([peer, subprocess.Popen(["torsocks", "git", "-C", os.path.abspath("repo"), "pull", "git://%s.onion/repo" % peer])])
         
     for (peer,proc) in processes:
         if proc.wait() != 0:
@@ -155,7 +155,7 @@ def pull(config):
 
     processes = []
     for peer in peers:
-        processes.append([peer, subprocess.Popen(["torsocks", "git", "-C", os.path.abspath("repo.git"), "pull", "git://%s.onion/repo.git" % peer])])
+        processes.append([peer, subprocess.Popen(["torsocks", "git", "-C", os.path.abspath("repo"), "pull", "git://%s.onion/repo" % peer])])
         
     for (peer,proc) in processes:
         if proc.wait() != 0:
@@ -163,7 +163,7 @@ def pull(config):
 
 def init(config):
     print "Initializing ..."
-    p = subprocess.Popen(["git", "init", "--bare", "repo.git/"])
+    p = subprocess.Popen(["git", "init", "repo"])
     p.wait()
     print "Initialized"
 
