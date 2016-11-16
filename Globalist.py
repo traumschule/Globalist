@@ -135,7 +135,7 @@ def getpeers(config):
 def clone(config):
     peers = getpeers(config)
 
-    # FIXME: when the first fails, we should move on to the next
+    # FIXME: when the first fails, we should move on to the next..
     cloneproc = subprocess.Popen(["torsocks", "git", "clone", "git://%s.onion/repo" % peers[0], "repo"])
     if cloneproc.wait() != 0:
         print "Error cloning, exiting."
