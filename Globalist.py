@@ -14,6 +14,7 @@
 # Use scenario:
 # a) Run Tor.
 # b) Run the server in the background and schedule a job for pulling from peers.
+#    it is a git server that listens on <your-identifier>.onion:9418
 # c) Globalist.py creates a bare git, which you may use to push and pull your own changes.
 
 __version__ = "0.0.0"
@@ -64,12 +65,17 @@ def run_server(config, localport = 9418):
     print "Running git server on %s:9418" % config.get('onion', 'hostname')
     print "You can now hand out this onion to prospective peers."
     print "It will be re-used anytime Globalist starts in this directory."
-    gitdaemon = subprocess.Popen(["git", "daemon", "--listen=127.0.0.1", "--port=%d" % localport])
+    subprocess.Popen(["touch",  os.path.abspath(os.path.join("repo.git","git-daemon-export-ok")) ]).wait()
+    gitdaemon = subprocess.Popen(["git", "daemon", "--base-path=%s" % os.path.abspath("."),
+                                  "--reuseaddr", "--verbose",
+                                  "--listen=127.0.0.1", "--port=%d" % localport,
+                                  os.path.abspath("repo.git")])
     output = gitdaemon.communicate()[0]
+    print output
     # then background this process
 
 def makeonion(config, options):
-    with Controller.from_port(port = 9051) as controller:
+    with Controller.from_port(port = 9151) as controller:
         # stem docs say: provide the password here if you set one:
         controller.authenticate()
 
@@ -128,14 +134,16 @@ def clone(config):
     peers = getpeers(config)
 
     # FIXME: when the first fails, we should move on to the next
-    cloneproc = subprocess.Popen(["torsocks", "git", "clone", "--bare", "git://%s.onion/" % peers[0], "repo.git"])
+    cloneproc = subprocess.Popen(["torsocks", "git", "clone", "--bare", "git://%s.onion/repo.git" % peers[0], "repo.git"])
     if cloneproc.wait() != 0:
         print "Error cloning, exiting."
         exit(-1)
+    else:
+        subprocess.Popen(["touch",  os.path.abspath(os.path.join("repo.git","git-daemon-export-ok")) ]).wait()
 
     processes = []
     for peer in peers[1:]:
-        processes.append([peer, subprocess.Popen(["torsocks", "git", "-C", os.path.abspath("repo.git"), "pull", "git://%s.onion/" % peer])])
+        processes.append([peer, subprocess.Popen(["torsocks", "git", "-C", os.path.abspath("repo.git"), "pull", "git://%s.onion/repo.git" % peer])])
         
     for (peer,proc) in processes:
         if proc.wait() != 0:
@@ -146,7 +154,7 @@ def pull(config):
 
     processes = []
     for peer in peers:
-        processes.append([peer, subprocess.Popen(["torsocks", "git", "-C", os.path.abspath("repo.git"), "pull", "git://%s.onion/" % peer])])
+        processes.append([peer, subprocess.Popen(["torsocks", "git", "-C", os.path.abspath("repo.git"), "pull", "git://%s.onion/repo.git" % peer])])
         
     for (peer,proc) in processes:
         if proc.wait() != 0:
