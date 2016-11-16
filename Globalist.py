@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python2
 # -*- coding: utf-8 -*-
 
 # Globalist: manage a global repo via decentral git instances
@@ -9,6 +9,7 @@
 # Python2. Dependencies:
 #   - stem (torsocks pip install stem)
 #   - git must be installed
+#   - torsocks must be installed
 #   - tor must be up and running and the ControlPort open
 
 # Use scenario:
