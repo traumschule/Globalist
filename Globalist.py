@@ -8,7 +8,6 @@
 
 # Python2/3. Dependencies:
 #   - stem (torsocks pip install stem / via distro)
-
 #   - git must be installed
 #   - torsocks must be installed
 #   - tor must be up and running and the ControlPort open
@@ -31,8 +30,6 @@ import os
 import sys
 import subprocess
 
-
-
 from stem.control import Controller
 
 # Usage:
@@ -42,16 +39,20 @@ from stem.control import Controller
 # Put a configuration file repo.cfg listing some peers. Done.
 #
 # Initialize:
-#  Either a) git init repo/
+#  Either a) (git init repo/) ->
 #    $ python Globalist.py -i
-#  or     b) torsocks git clone git://example7abcdefgh.onion
+#  or     b) (torsocks git clone git://example7abcdefgh.onion) ->
 #    $ python Globalist.py -c
 #
 # Have fun:
 #  Run server
 #    $ python Globalist.py
-#  Pull from peers
+#  Pull from peers once
 #    $ python Globalist.py -p
+#  Periodically pull, don't serve
+#    $ python Globalist.py -pP 1800
+#  Periodically pull and also serve
+#    $ python Globalist.py -P 1800
 #
 # That's it.
 
@@ -163,6 +164,8 @@ def clone(config):
 def pull(config):
     peers = getpeers(config)
 
+    print ("Pulling from %s" % peers)
+
     processes = []
     for peer in peers:
         processes.append([peer, subprocess.Popen(["torsocks", "git", "-C", os.path.abspath("repo"), "pull", "git://%s.onion/repo" % peer])])
@@ -178,19 +181,22 @@ def init(config):
     print ("Initialized")
 
 if __name__=='__main__':
-    # default settings
 
+    # OptionParser is capable of printing a helpscreen
     opt = op.OptionParser()
     opt.add_option("-i", "--init", dest="o_init", action="store_true",
                    default=False, help="make new empty repo")
     opt.add_option("-c", "--clone", dest="o_clone", action="store_true",
                    default=False, help="clone repo from 1st peer")
     opt.add_option("-p", "--pull", dest="o_pull", action="store_true",
-                   default=False, help="pull from peers")
+                   default=False, help="pull from peers and don't serve")
+    opt.add_option("-P", "--periodically-pull", dest="a_pull", action="store",
+                   type="int", default=None, metavar="PERIOD",
+                   help="pull from peers every n seconds")   
     opt.add_option("-L", "--local", dest="a_localport", action="store", type="int",
-                   default=9418, help="local port for git daemon")
-    opt.add_option("-P", "--control-port", dest="a_controlport", action="store", type="int",
-                   default=9418, help="Tor controlport")
+                   default=9418, metavar="PORT", help="local port for git daemon")
+    opt.add_option("-C", "--control-port", dest="a_controlport", action="store", type="int",
+                   default=9151,  metavar="PORT", help="Tor controlport")
     opt.add_option("-a", "--await", dest="o_ap", action="store_true",
                    default=False, help="await publication of .onion in DHT before proceeding")
     (options, args) = opt.parse_args()
@@ -233,11 +239,34 @@ if __name__=='__main__':
         clone(config)
         exit(1)
 
-    # It's either pull or serve. It's no problem running pull while the
-    # server is up.
-    if options.o_pull:
+
+    peers = getpeers(config)
+
+    if options.a_pull:
+        if not len(peers):
+            print ("No peers, not starting pulling task.")
+
+        else:
+            import threading
+            from   datetime import timedelta as td
+            from   datetime import datetime
+            
+            class T:
+                def __init__(self):
+                    self.last = datetime.now()
+                    
+                def run(self):
+                    pull(config)
+                    threading.Timer(options.a_pull, T.run, args=(self,)).start()
+                    
+            t = T()
+            t.run()
+
+    # It's either pull or serve. It's no problem running pull from
+    # another console while the server is up.
+    if options.o_pull and not options.a_pull:
         pull(config)
-    else:
+    elif not options.o_pull:
         controller = Controller.from_port(port = options.a_controlport)
         makeonion(controller, config, options)
         run_server(config, localport = options.a_localport)
