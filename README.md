@@ -21,3 +21,9 @@ peers = <comma-separated list of onion domain names, with or without the suffix 
 ```
 
 For each shared repo, Globalist will create one .onion service.
+
+## To do
+
+set default commit messages
+support signed commits
+push?
