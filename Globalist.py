@@ -8,6 +8,7 @@
 
 # Python2/3. Dependencies:
 #   - stem (torsocks pip install stem / via distro)
+#     a recent version (>= 1.5.0) is needed for auth
 #   - git must be installed
 #   - torsocks must be installed
 #   - tor must be up and running and the ControlPort open
@@ -20,7 +21,7 @@
 #    only a fraction of the time.
 # c) Globalist.py creates a git, which you may use to push and pull your own changes.
 
-__version__ = "0.0.2"
+__version__ = "0.0.3"
 
 try:
     import ConfigParser as cp
@@ -30,8 +31,10 @@ import optparse as op
 import re
 import os
 import sys
+import json
 import subprocess
 
+import stem
 from stem.control import Controller
 
 # Usage:
@@ -74,6 +77,8 @@ from stem.control import Controller
 
 DEFAULT_CONTROLPORT = 9151
 
+STATUS = {'peers': None}
+
 def run_server(config, localport = 9418):
     print ("Running git server on %s.onion:9418" % config.get('onion', 'hostname'))
     print ("You can now hand out this onion to prospective peers.")
@@ -95,23 +100,44 @@ def makeonion(controller, config, options):
     
     onion = None
 
+    extra_kwargs = {}
+    
     if config.has_section('onion'):
         print ("Attempting to use saved onion identity")
         (keytype,key) = config.get('onion', 'key').split(':',1)
-        onion = controller.create_ephemeral_hidden_service(ports={9418: options.a_localport}, discard_key=True, await_publication=options.o_ap, key_type=keytype, key_content=key)
+
+        if options.o_auth:
+            try:
+                print ("Attempting to use saved clientauth")
+                extra_kwargs['basic_auth'] =\
+                dict([config.get('onion', 'clientauth').split(':',1)])
+            except (KeyError, cp.NoOptionError) as e:
+                print ("No client auth present, generating one")
+                extra_kwargs['basic_auth'] = {'somebody': None}
+        else:
+            print ("Not using clientauth.")
+
+        onion = controller.create_ephemeral_hidden_service(**extra_kwargs, ports={9418: options.a_localport}, discard_key=True, await_publication=options.o_ap, key_type=keytype, key_content=key)
+
     else:
         print ("I'm afraid we don't have an identity yet, creating one")
-        onion = controller.create_ephemeral_hidden_service(ports={9418: options.a_localport}, discard_key=False, await_publication=options.o_ap)
 
-    # print onion
+        if options.o_auth:
+            extra_kwargs['basic_auth'] = {'somebody': None}
+
+        onion = controller.create_ephemeral_hidden_service(**extra_kwargs, ports={9418: options.a_localport}, discard_key=False, await_publication=options.o_ap)
+
+#    print (onion)
+
     print ("Tor controller says Onion OK")
 
     if not onion.is_ok():
         raise Exception('Failed to publish onion.')
     else:
-        for o in onion:
-            if o != "OK":
-                k, v = o.split('=', 1)
+        # perhaps avoid overwriting when already present?
+        for line in onion:
+            if line != "OK":
+                k, v = line.split('=', 1)
                 # we only request the key if the service is new
                 if k == "PrivateKey":
                     try:
@@ -119,30 +145,77 @@ def makeonion(controller, config, options):
                     except cp.DuplicateSectionError as e:
                         pass
                     config.set('onion', 'key', v)
-                    config.write(open('repo.cfg', 'w'))
                 if k == "ServiceID":
                     try:
                         config.add_section('onion')
                     except cp.DuplicateSectionError as e:
                         pass
                     config.set('onion', 'hostname', v)
-                    config.write(open('repo.cfg', 'w'))
+                if k == "ClientAuth":
+                    try:
+                        config.add_section('onion')
+                    except cp.DuplicateSectionError as e:
+                        pass
+                    config.set('onion', 'clientauth', v)
+            config.write(open('repo.cfg', 'w'))
+
+
+def set_client_authentications(ls):
+    controller = Controller.from_port(port = options.a_controlport)
+    controller.authenticate()
+    # is there no sane way to _append_ a multi-config option in Tor????
+    # control protocol badly misdesigned, nobody thought of concurrent access???!?
+    controller.set_caching(False)
+    hsa = controller.get_conf_map('hidservauth') 
+
+    for authpair in ls:
+        if authpair['auth'] and len(authpair['auth']):
+            hsa['hidservauth'].append('%s.onion %s' % (authpair['onion'], authpair['auth']))
+
+    hsa['hidservauth'] = list(set(hsa['hidservauth']))
+
+    controller.set_conf('hidservauth', hsa['hidservauth'])
+    controller.close()
+    
 
 def getpeers(config):
+    if STATUS['peers']:
+        return STATUS['peers']
+
     if config.has_section('network'):
         peerslist = config.get('network', 'peers').split(',')
         peers = []
-        for peerdomain in peerslist:
+        authpairs = []
+
+        for peerentry in peerslist:
+
             # extract what looks like an onion identifier
             try:
-                peerdomain = re.findall('[a-z2-8]{16}', peerdomain)[0]
-#                print ("Given %s" % peerdomain)
-                peers += [peerdomain]
+                authpair = re.findall('(?:(somebody:[A-Za-z0-9+/]{22})@)?([a-z2-8]{16})', peerentry)[0]
+
+                userpass = authpair[0].split(":",1)
+                if not userpass or not len(userpass)==2:
+                    userpass = (None, None)
+
+                authpairs += [{'auth':userpass[1],
+                               'user':userpass[0], # somebody
+                               'onion':authpair[1]}]
+                peers += [authpair[1]]
+
             except Exception as e:
                 print (e)
+
+        set_client_authentications(authpairs)
+
+        STATUS['peers'] = peers
+
         return peers
+
     else:
+        STATUS['peers'] = []
+
         return []
+
 
 def clone(config):
     peers = getpeers(config)
@@ -201,7 +274,14 @@ if __name__=='__main__':
                    default=9151,  metavar="PORT", help="Tor controlport")
     opt.add_option("-a", "--await", dest="o_ap", action="store_true",
                    default=False, help="await publication of .onion in DHT before proceeding")
+    opt.add_option("-X", "--no-auth", action="store_false", default=True,
+                   dest="o_auth",
+                   help="disable authentication (not private)")
     (options, args) = opt.parse_args()
+
+    if options.o_auth and stem.__version__ < '1.5.0':
+        sys.stderr.write ("stem version >=1.5.0 required for auth\n")
+        exit(1)
 
     if not options.a_controlport:
         options.a_controlport = DEFAULT_CONTROLPORT
@@ -210,6 +290,7 @@ if __name__=='__main__':
     cfgfile = None
     try:
         cfgfile = open('repo.cfg')
+
     except FileNotFoundError as e:
         print("Trying to make file repo.cfg")
         try:
@@ -272,8 +353,10 @@ if __name__=='__main__':
 
     # It's either pull or serve. It's no problem running pull from
     # another console while the server is up.
+
     if options.o_pull and not options.a_pull:
         pull(config)
+
     elif not options.o_pull:
         controller = Controller.from_port(port = options.a_controlport)
         makeonion(controller, config, options)
@@ -281,4 +364,7 @@ if __name__=='__main__':
         controller.close()
 
     for t in threads:
-        t.wait()
+        t.join()
+
+# TODO: clean up hidservauth entries on stop
+# TODO: kill all with one Ctrl-C
