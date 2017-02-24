@@ -77,7 +77,7 @@ from stem.control import Controller
 
 DEFAULT_CONTROLPORT = 9151
 
-STATUS = {'peers': None}
+STATUS = {'peers': None, 'socksport': None}
 
 def run_server(config, localport = 9418):
     print ("Running git server on %s.onion:9418" % config.get('onion', 'hostname'))
@@ -216,12 +216,11 @@ def getpeers(config):
 
         return []
 
-
 def clone(config):
     peers = getpeers(config)
 
     # FIXME: when the first fails, we should move on to the next..
-    cloneproc = subprocess.Popen(["torsocks", "git", "clone", "git://%s.onion/repo" % peers[0], "repo"])
+    cloneproc = subprocess.Popen(["torsocks", "-P", STATUS['socksport'], "git", "clone", "git://%s.onion/repo" % peers[0], "repo"])
     if cloneproc.wait() != 0:
         print ("Error cloning, exiting.")
         exit(-1)
@@ -230,7 +229,7 @@ def clone(config):
 
     processes = []
     for peer in peers[1:]:
-        processes.append([peer, subprocess.Popen(["torsocks", "git", "-C", os.path.abspath("repo"), "pull", "git://%s.onion/repo" % peer])])
+        processes.append([peer, subprocess.Popen(["torsocks", "-P", STATUS['socksport'], "git", "-C", os.path.abspath("repo"), "pull", "git://%s.onion/repo" % peer])])
         
     for (peer,proc) in processes:
         if proc.wait() != 0:
@@ -243,7 +242,7 @@ def pull(config):
 
     processes = []
     for peer in peers:
-        processes.append([peer, subprocess.Popen(["torsocks", "git", "-C", os.path.abspath("repo"), "pull", "git://%s.onion/repo" % peer])])
+        processes.append([peer, subprocess.Popen(["torsocks", "-P", STATUS['socksport'], "git", "-C", os.path.abspath("repo"), "pull", "git://%s.onion/repo" % peer])])
         
     for (peer,proc) in processes:
         if proc.wait() != 0:
@@ -259,24 +258,32 @@ if __name__=='__main__':
 
     # OptionParser is capable of printing a helpscreen
     opt = op.OptionParser()
+
     opt.add_option("-i", "--init", dest="o_init", action="store_true",
                    default=False, help="make new empty repo")
+
     opt.add_option("-c", "--clone", dest="o_clone", action="store_true",
                    default=False, help="clone repo from 1st peer")
+
     opt.add_option("-p", "--pull", dest="o_pull", action="store_true",
                    default=False, help="pull from peers and don't serve")
+
     opt.add_option("-P", "--periodically-pull", dest="a_pull", action="store",
                    type="int", default=None, metavar="PERIOD",
-                   help="pull from peers every n seconds")   
+                   help="pull from peers every n seconds")
+
     opt.add_option("-L", "--local", dest="a_localport", action="store", type="int",
                    default=9418, metavar="PORT", help="local port for git daemon")
+
     opt.add_option("-C", "--control-port", dest="a_controlport", action="store", type="int",
                    default=9151,  metavar="PORT", help="Tor controlport")
+
     opt.add_option("-a", "--await", dest="o_ap", action="store_true",
                    default=False, help="await publication of .onion in DHT before proceeding")
+
     opt.add_option("-X", "--no-auth", action="store_false", default=True,
-                   dest="o_auth",
-                   help="disable authentication (not private)")
+                   dest="o_auth", help="disable authentication (not private)")
+
     (options, args) = opt.parse_args()
 
     if options.o_auth and stem.__version__ < '1.5.0':
@@ -286,11 +293,16 @@ if __name__=='__main__':
     if not options.a_controlport:
         options.a_controlport = DEFAULT_CONTROLPORT
 
+    # Extract socksport via c.get_conf and use this (-P in torsocks)
+    controller = Controller.from_port(port = options.a_controlport)
+    controller.authenticate()
+    STATUS['socksport'] = controller.get_conf('SocksPort').split(" ",1)[0]
+    controller.close()
+
     config = cp.ConfigParser()
     cfgfile = None
     try:
         cfgfile = open('repo.cfg')
-
     except FileNotFoundError as e:
         print("Trying to make file repo.cfg")
         try:
@@ -302,8 +314,6 @@ if __name__=='__main__':
             exit(1)
 
     config.readfp(cfgfile)
-
-    # print options
 
     try:
         os.stat("repo")
@@ -351,8 +361,9 @@ if __name__=='__main__':
             threads.append(t)
             t.start()
 
-    # It's either pull or serve. It's no problem running pull from
-    # another console while the server is up.
+    # It's either pull(once) or serve. It's no problem running pull from
+    # another console while the server is up. It's no problem specifying
+    # periodic pull with either.
 
     if options.o_pull and not options.a_pull:
         pull(config)
