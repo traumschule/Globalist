@@ -16,6 +16,8 @@
 # a) Run Tor.
 # b) Run the server in the background and schedule a job for pulling from peers.
 #    it is a git server that listens on <your-identifier>.onion:9418
+#    it's to be expected that peers uptime will intersect with yours
+#    only a fraction of the time.
 # c) Globalist.py creates a git, which you may use to push and pull your own changes.
 
 __version__ = "0.0.2"
@@ -73,7 +75,7 @@ from stem.control import Controller
 DEFAULT_CONTROLPORT = 9151
 
 def run_server(config, localport = 9418):
-    print ("Running git server on %s:9418" % config.get('onion', 'hostname'))
+    print ("Running git server on %s.onion:9418" % config.get('onion', 'hostname'))
     print ("You can now hand out this onion to prospective peers.")
     print ("It will be re-used anytime Globalist starts in this directory.")
     subprocess.Popen(["touch",  os.path.abspath(os.path.join("repo",".git","git-daemon-export-ok")) ]).wait()
@@ -134,7 +136,7 @@ def getpeers(config):
             # extract what looks like an onion identifier
             try:
                 peerdomain = re.findall('[a-z2-8]{16}', peerdomain)[0]
-                print ("Given %s" % peerdomain)
+#                print ("Given %s" % peerdomain)
                 peers += [peerdomain]
             except Exception as e:
                 print (e)
@@ -225,7 +227,7 @@ if __name__=='__main__':
     try:
         os.stat("repo")
     except FileNotFoundError as e:
-        if not options.o_init:
+        if not options.o_init and not options.o_clone:
             print("./repo/ does not exist, try %s -i" % sys.argv[0])
             exit(1)
     except Exception as e:
@@ -235,12 +237,15 @@ if __name__=='__main__':
     if options.o_init:
         init(config)
 
+    peers = getpeers(config)
+
     if options.o_clone:
+        if not len(peers):
+            print ("No peers, can't clone. Please enter a peer in repo.cfg")
         clone(config)
         exit(1)
 
-
-    peers = getpeers(config)
+    threads = []
 
     if options.a_pull:
         if not len(peers):
@@ -259,8 +264,11 @@ if __name__=='__main__':
                     pull(config)
                     threading.Timer(options.a_pull, T.run, args=(self,)).start()
                     
-            t = T()
-            t.run()
+            task = T()
+
+            t = threading.Thread(target=T.run, args=(task,))
+            threads.append(t)
+            t.start()
 
     # It's either pull or serve. It's no problem running pull from
     # another console while the server is up.
@@ -271,3 +279,6 @@ if __name__=='__main__':
         makeonion(controller, config, options)
         run_server(config, localport = options.a_localport)
         controller.close()
+
+    for t in threads:
+        t.wait()
