@@ -20,6 +20,8 @@ Make a new directory and put this in the file ./repo.cfg (when creating a new re
 peers = <comma-separated list of onion domain names, with or without the suffix .onion>
 ```
 
+For a public repository, no authentication is needed (option -X). In case authentication is used, prepend the secret as follows: somebody:secret@peeroniondomainname.onion
+
 For each shared repo, Globalist will create one .onion service.
 
 ## To do
