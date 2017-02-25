@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-__version__ = "0.0.3"
+__version__ = "0.0.4"
 
 try:
     import ConfigParser as cp
@@ -59,8 +59,13 @@ DEFAULT_CONTROLPORT = 9151
 
 STATUS = {'peers': None, 'socksport': None}
 
+OPTIONS = None
+
 def run_server(config, localport = 9418):
     print ("Running git server on %s.onion:9418" % config.get('onion', 'hostname'))
+    authkey = config.get('onion', 'clientauth')
+    if authkey:
+        print ("Client auth is %s" % authkey)
     print ("You can now hand out this onion to prospective peers.")
     print ("It will be re-used anytime Globalist starts in this directory.")
     subprocess.Popen(["touch",  os.path.abspath(os.path.join("repo",".git","git-daemon-export-ok")) ]).wait()
@@ -141,6 +146,9 @@ def makeonion(controller, config, options):
 
 
 def set_client_authentications(ls):
+    global OPTIONS
+    options = OPTIONS
+
     controller = Controller.from_port(port = options.a_controlport)
     controller.authenticate()
     # is there no sane way to _append_ a multi-config option in Tor????
@@ -264,6 +272,9 @@ def main(args=[]):
                    dest="o_auth", help="disable authentication (not private)")
 
     (options, args) = opt.parse_args(args)
+
+    global OPTIONS
+    OPTIONS = options
 
     if options.o_auth and stem.__version__ < '1.5.0':
         sys.stderr.write ("stem version >=1.5.0 required for auth\n")

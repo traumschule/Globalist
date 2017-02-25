@@ -21,9 +21,10 @@
 #    only a fraction of the time.
 # c) Globalist.py creates a git, which you may use to push and pull your own changes.
 
-__version__ = "0.0.3"
+__version__ = "0.0.4"
 
 import globalist
+import sys
 
 if __name__=='__main__':
     globalist.main(args=sys.argv[1:])

@@ -4,7 +4,7 @@ from distutils.core import setup
 
 setup(
     name='Globalist',
-    version='0.0.3',
+    version='0.0.4',
     description='Globalist distributed git onions',
     author='fnordomat',
 #    author_email='',
