@@ -10,6 +10,8 @@ setup(
 #    author_email='',
     url='https://github.com/fnordomat/Globalist',
     packages=['globalist'],
+    scripts=['Globalist.py'],
+    install_requires=['stem>=1.5.0'],
     license='GPLv3'
 )
 
