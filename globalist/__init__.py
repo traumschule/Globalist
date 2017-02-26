@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-__version__ = "0.0.4"
+__version__ = "0.0.6"
 
 try:
     import ConfigParser as cp
@@ -54,6 +54,10 @@ from stem.control import Controller
 
 # [network]
 # peers = example7abcdefgh.onion, example8abcdefgh.onion
+# (possibly prefixed with somebody:authkey@ ...)
+
+# when using -b (bare), merge remote changes locally after
+# git pull origin remote/origin/master.
 
 DEFAULT_CONTROLPORT = 9151
 
@@ -61,20 +65,37 @@ STATUS = {'peers': None, 'socksport': None}
 
 OPTIONS = None
 
+def git(command):
+    print (command)
+    p = subprocess.Popen(["git"] + command)
+    return p
+
+def make_exportable(path):
+    subprocess.Popen(["touch", os.path.abspath(os.path.join(path, "git-daemon-export-ok")) ]).wait()
+
 def run_server(config, localport = 9418):
-    print ("Running git server on %s.onion:9418" % config.get('onion', 'hostname'))
+    print ("Running git server on %s.onion" % config.get('onion', 'hostname'))
     authkey = config.get('onion', 'clientauth')
     if authkey:
         print ("Client auth is %s" % authkey)
+    print ("Git server local port is %d" % localport)
     print ("You can now hand out this onion to prospective peers.")
     print ("It will be re-used anytime Globalist starts in this directory.")
-    subprocess.Popen(["touch",  os.path.abspath(os.path.join("repo",".git","git-daemon-export-ok")) ]).wait()
-    gitdaemon = subprocess.Popen(["git", "daemon", "--base-path=%s" % os.path.abspath("."),
-                                  "--reuseaddr", "--verbose",
+
+    what = "repo"
+
+    if OPTIONS.o_bare:
+        make_exportable("repo.git")
+        what += ".git"
+    else:
+        make_exportable(os.path.join("repo",".git"))
+
+    gitdaemon = git(["daemon", "--base-path=%s" % os.path.abspath("."),
+                     "--reuseaddr", "--verbose",
     # there could be a global setting enabling write access??
-                                  "--disable=receive-pack",
-                                  "--listen=127.0.0.1", "--port=%d" % localport,
-                                  os.path.abspath("repo")])
+                     "--disable=receive-pack",
+                     "--listen=127.0.0.1", "--port=%d" % localport,
+                     os.path.abspath(what)])
     output = gitdaemon.communicate()[0]
     print (output)
     # then background this process
@@ -82,7 +103,8 @@ def run_server(config, localport = 9418):
 def makeonion(controller, config, options):
     # stem docs say: provide the password here if you set one:
     controller.authenticate()
-    
+    # todo catch UnreadableCookieFile(
+
     onion = None
 
     extra_kwargs = {}
@@ -208,12 +230,25 @@ def clone(config):
     peers = getpeers(config)
 
     # FIXME: when the first fails, we should move on to the next..
-    cloneproc = subprocess.Popen(["torsocks", "-P", STATUS['socksport'], "git", "clone", "git://%s.onion/repo" % peers[0], "repo"])
+
+    what  = "git://%s.onion/repo" % peers[0]
+    where = "repo"
+    how   = []
+
+    if OPTIONS.o_bare:
+        what  += ".git"
+        where += ".git"
+        how   = ["--bare", "--mirror"]
+
+    cloneproc = subprocess.Popen(["torsocks", "-P", STATUS['socksport'], "git", "clone"] + how + [what, where])
     if cloneproc.wait() != 0:
         print ("Error cloning, exiting.")
         return -1
     else:
-        subprocess.Popen(["touch",  os.path.abspath(os.path.join("repo",".git","git-daemon-export-ok")) ]).wait()
+        make_exportable(where)
+
+    # Make a local editable repo
+    git(["clone", "repo.git", "repo"]).wait()
 
     processes = []
     for peer in peers[1:]:
@@ -236,28 +271,56 @@ def pull(config):
         if proc.wait() != 0:
             print ("Error with %s" % peer)
 
+def fetch(config):
+    peers = getpeers(config)
+    print ("Fetching from %s" % peers)
+    processes = []
+    for peer in peers:
+        processes.append([peer, subprocess.Popen(["torsocks", "-P", STATUS['socksport'], "git", "-C", os.path.abspath("repo.git"), "fetch", "git://%s.onion/repo.git" % peer, '+refs/heads/*:refs/remotes/origin/*'])])
+# ,  
+
+    for (peer,proc) in processes:
+        if proc.wait() != 0:
+            print ("Error with %s" % peer)
+
 def init(config):
+    global OPTIONS # not needed for read access btw
+    options = OPTIONS
+
     print ("Initializing ...")
-    p = subprocess.Popen(["git", "init", "repo"])
-    p.wait()
+
+    if options.o_bare:
+        git(["init", "repo.git", "--bare"]).wait()
+        # Make a local editable repo
+        git(["clone", "repo.git", "repo"]).wait()
+
+    else:
+        git(["init", "repo"]).wait()
+
     print ("Initialized")
 
 def main(args=[]):
     # OptionParser is capable of printing a helpscreen
     opt = op.OptionParser()
 
+    opt.add_option("-V", "--version", dest="o_version", action="store_true",
+                   default=False, help="print version number")
+
     opt.add_option("-i", "--init", dest="o_init", action="store_true",
                    default=False, help="make new empty repo")
+
+    opt.add_option("-b", "--bare", dest="o_bare", action="store_true",
+                   default=False, help="use bare repos and fetch, not pull")
 
     opt.add_option("-c", "--clone", dest="o_clone", action="store_true",
                    default=False, help="clone repo from 1st peer")
 
     opt.add_option("-p", "--pull", dest="o_pull", action="store_true",
-                   default=False, help="pull from peers and don't serve")
+                   default=False, help="pull / fetch from peers and don't serve")
 
     opt.add_option("-P", "--periodically-pull", dest="a_pull", action="store",
                    type="int", default=None, metavar="PERIOD",
-                   help="pull from peers every n seconds")
+                   help="pull / fetch from peers every n seconds")
 
     opt.add_option("-L", "--local", dest="a_localport", action="store", type="int",
                    default=9418, metavar="PORT", help="local port for git daemon")
@@ -275,6 +338,10 @@ def main(args=[]):
 
     global OPTIONS
     OPTIONS = options
+
+    if options.o_version:
+        print (__version__)
+        return 0
 
     if options.o_auth and stem.__version__ < '1.5.0':
         sys.stderr.write ("stem version >=1.5.0 required for auth\n")
@@ -306,12 +373,21 @@ def main(args=[]):
     config.readfp(cfgfile)
 
     try:
-        os.stat("repo")
-
+        os.stat("repo.git")
+        options.o_bare = True
+        print ("repo.git exists, set -b implicitly") # TODO -B to override
     except FileNotFoundError as e:
-        if not options.o_init and not options.o_clone:
-            print("./repo/ does not exist, try %s -i" % sys.argv[0])
+        if not options.o_init and not options.o_clone and options.o_bare:
+            print ("./repo.git/ does not exist, try -ib or -cb")
             return 1
+
+    try:
+        os.stat("repo")
+    except FileNotFoundError as e:
+        if not options.o_init and not options.o_clone and not options.o_bare:
+            print("./repo/ does not exist, try -i or -c")
+            return 1
+
     except Exception as e:
         print (e)
         return 1
@@ -343,12 +419,16 @@ def main(args=[]):
                     self.last = datetime.now()
                     
                 def run(self):
-                    pull(config)
+                    if options.o_bare:
+                        fetch(config)
+                    else:
+                        pull(config)
                     threading.Timer(options.a_pull, T.run, args=(self,)).start()
                     
             task = T()
 
             t = threading.Thread(target=T.run, args=(task,))
+            t . setDaemon(True)
             threads.append(t)
             t.start()
 
@@ -357,7 +437,10 @@ def main(args=[]):
     # periodic pull with either.
 
     if options.o_pull and not options.a_pull:
-        pull(config)
+        if options.o_bare:
+            fetch(config)
+        else:
+            pull(config)
 
     elif not options.o_pull:
         controller = Controller.from_port(port = options.a_controlport)
@@ -369,4 +452,4 @@ def main(args=[]):
         t.join()
 
 # TODO: clean up hidservauth entries on stop
-# TODO: kill all with one Ctrl-C
+# TODO: kill all with one Ctrl-C -> done?
