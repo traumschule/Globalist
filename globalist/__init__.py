@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-__version__ = "0.0.6"
+__version__ = "0.0.6.1"
 
 try:
     import ConfigParser as cp
@@ -374,8 +374,11 @@ def main(args=[]):
 
     try:
         os.stat("repo.git")
+        if not options.o_bare:
+            print ("repo.git exists, setting -b implicitly")
+            # TODO -B to override
         options.o_bare = True
-        print ("repo.git exists, set -b implicitly") # TODO -B to override
+
     except FileNotFoundError as e:
         if not options.o_init and not options.o_clone and options.o_bare:
             print ("./repo.git/ does not exist, try -ib or -cb")
