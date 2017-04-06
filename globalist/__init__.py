@@ -75,9 +75,12 @@ def make_exportable(path):
 
 def run_server(config, localport = 9418):
     print ("Running git server on %s.onion" % config.get('onion', 'hostname'))
-    authkey = config.get('onion', 'clientauth')
-    if authkey:
-        print ("Client auth is %s" % authkey)
+    try:
+        authkey = config.get('onion', 'clientauth')
+        if authkey:
+            print ("Client auth is %s" % authkey)
+    except (KeyError, cp.NoOptionError) as e:
+        print ("No client auth")
     print ("Git server local port is %d" % localport)
     print ("You can now hand out this onion to prospective peers.")
     print ("It will be re-used anytime Globalist starts in this directory.")
