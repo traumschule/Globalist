@@ -21,7 +21,8 @@
 #    only a fraction of the time.
 # c) Globalist.py creates a git, which you may use to push and pull your own changes.
 
-# __version__ = "0.0.5"
+# Bugs:
+# FIXME: clean up hidservauth entries on stop
 
 import globalist
 import sys

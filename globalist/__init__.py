@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-__version__ = "0.0.6.1"
+__version__ = "0.0.6.2"
 
 try:
     import ConfigParser as cp
@@ -66,7 +66,7 @@ STATUS = {'peers': None, 'socksport': None}
 OPTIONS = None
 
 def git(command):
-    print (command)
+#    print (command)
     p = subprocess.Popen(["git"] + command)
     return p
 
@@ -176,6 +176,11 @@ def set_client_authentications(ls):
     # is there no sane way to _append_ a multi-config option in Tor????
     # control protocol badly misdesigned, nobody thought of concurrent access???!?
     controller.set_caching(False)
+
+# except it doesn't work, the 650 message never arrives. why?
+#    controller.add_event_listener(my_confchanged_listener, EventType.CONF_CHANGED)
+# SETEVENTS conf_changed
+
     hsa = controller.get_conf_map('hidservauth') 
 
     for authpair in ls:
@@ -331,6 +336,9 @@ def main(args=[]):
     opt.add_option("-a", "--await", dest="o_ap", action="store_true",
                    default=False, help="await publication of .onion in DHT before proceeding")
 
+    opt.add_option("-x", "--auth", action="store_true", default=True,
+                   dest="o_auth", help="enable authentication (private)")
+
     opt.add_option("-X", "--no-auth", action="store_false", default=True,
                    dest="o_auth", help="disable authentication (not private)")
 
@@ -454,5 +462,4 @@ def main(args=[]):
     for t in threads:
         t.join()
 
-# TODO: clean up hidservauth entries on stop
-# TODO: kill all with one Ctrl-C -> done?
+# TODO: should only generate a clientauth on a previously unauthenticated repo if requested by command line option

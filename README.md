@@ -20,7 +20,31 @@ peers = <comma-separated list of onion domain names, with or without the suffix 
 
 For a public repository, no authentication is needed (option -X). In case authentication is used, prepend the secret as follows: somebody:secret@peeroniondomainname.onion
 
-For each shared repo, Globalist will create one .onion service.
+For each shared repo, Globalist will create one .onion service. Note that it is possible to use either bare repos or not-bare repos.
+
+To clone a bare repo:
+
+```
+Globalist.py -bc ...
+```
+
+To pull once from a bare repo:
+
+```
+Globalist.py -bp
+```
+
+## To install locally
+
+```
+./setup.py install --user
+```
+
+or 
+
+```
+torsocks pip3 install -v -e .
+```
 
 ## To do
 
