@@ -8,7 +8,7 @@ except ImportError:
 
 setup(
     name='Globalist',
-    version='0.0.6.3',
+    version='0.0.6.4',
     description='Globalist distributed git onions',
     author='fnordomat',
 #    author_email='',

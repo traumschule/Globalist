@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-__version__ = "0.0.6.3"
+__version__ = "0.0.6.4"
 
 try:
     import ConfigParser as cp
@@ -284,8 +284,8 @@ def fetch(config):
     print ("Fetching from %s" % peers)
     processes = []
     for peer in peers:
-        processes.append([peer, subprocess.Popen(["torsocks", "-P", STATUS['socksport'], "git", "-C", os.path.abspath("repo.git"), "fetch", "git://%s.onion/repo.git" % peer, '+refs/heads/*:refs/remotes/origin/*'])])
-# ,  
+        processes.append([peer, subprocess.Popen(["torsocks", "-P", STATUS['socksport'], "git", "-C", os.path.abspath("repo.git"), "fetch", "git://%s.onion/repo.git" % peer, 'origin'])])
+# +refs/heads/*:refs/remotes/origin/*'])])
 
     for (peer,proc) in processes:
         if proc.wait() != 0:
