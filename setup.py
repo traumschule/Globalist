@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 
-from distutils.core import setup
+try:
+	from setuptools import setup
+except ImportError:
+	print ('WARNING: please import setuptools for automatic dependency resolution.')
+	from distutils.core import setup
 
 setup(
     name='Globalist',
-    version='0.0.6.2',
+    version='0.0.6.3',
     description='Globalist distributed git onions',
     author='fnordomat',
 #    author_email='',

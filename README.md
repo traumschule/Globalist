@@ -48,6 +48,9 @@ torsocks pip3 install -v -e .
 
 ## To do
 
+security of the git-daemon?
+
 set default commit messages
+
 support signed commits
-push?
+
