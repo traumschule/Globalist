@@ -28,4 +28,7 @@ import globalist
 import sys
 
 if __name__=='__main__':
-    globalist.main(args=sys.argv[1:])
+    try:
+        globalist.main(args=sys.argv[1:])
+    except KeyboardInterrupt as e:
+        print("Ctrl-C caught, quitting.")

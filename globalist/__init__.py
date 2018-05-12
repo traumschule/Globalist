@@ -1,12 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-__version__ = "0.0.6.4"
+__version__ = "0.0.6.5"
 
-try:
-    import ConfigParser as cp
-except:
-    import configparser as cp # python3
+import configparser as cp
 import optparse as op
 import re
 import os
@@ -19,14 +16,13 @@ from stem.control import Controller
 
 # Usage:
 #
-# Make a directory.
-#
-# Put a configuration file repo.cfg listing some peers. Done.
+# Make a new directory. cd to the directory and populate it with
+# a configuration file repo.cfg listing some peers.
 #
 # Initialize:
-#  Either a) (git init repo/) ->
+#  Either a) new (git init repo/) ->
 #    $ python Globalist.py -i
-#  or     b) (torsocks git clone git://example7abcdefgh.onion) ->
+#  or     b) from existing (torsocks git clone git://example7abcdefgh.onion) ->
 #    $ python Globalist.py -c
 #
 # Have fun:
@@ -39,18 +35,14 @@ from stem.control import Controller
 #  Periodically pull and also serve
 #    $ python Globalist.py -P 1800
 #
-# That's it.
+# That's it. Note that you can manage the repo.git/ and repo.cfg separately.
 
 # One can simply check in a list of onions for open peering
 # as PEERS.txt ...
 
-# A word of CAUTION: anyone can commit anything
-# and there's no mechanism for permanently blacklisting
-# malicious peers (although one can simply remove them
-# as they crop up and roll back their changes).
-#
-# A future version of Globalist.py should introduce
-# signed commits + reputation system, when the need arises.
+# Anyone can commit anything and there's no mechanism for permanently
+# blacklisting malicious peers (although one can simply remove them
+# as they crop up and refuse to accept their commits).
 
 # [network]
 # peers = example7abcdefgh.onion, example8abcdefgh.onion
@@ -65,24 +57,40 @@ STATUS = {'peers': None, 'socksport': None}
 
 OPTIONS = None
 
+class color:
+    RED = '\x1b[31m'
+    GOLD = '\x1b[33m'
+    BOLD = '\x1b[1m'
+    UNSET = '\x1b[0m'
+    def red(s):
+        return color.RED + s + color.UNSET
+    def gold(s):
+        return color.GOLD + s + color.UNSET
+    def bold(s):
+        return color.BOLD + s + color.UNSET
+
 def git(command):
-#    print (command)
-    p = subprocess.Popen(["git"] + command)
-    return p
+    return subprocess.Popen(["git"] + command)
 
 def make_exportable(path):
     subprocess.Popen(["touch", os.path.abspath(os.path.join(path, "git-daemon-export-ok")) ]).wait()
 
 def run_server(config, localport = 9418):
-    print ("Running git server on %s.onion" % config.get('onion', 'hostname'))
+    hostname = config.get('onion', 'hostname')
+    print ("Running git server on %s.onion" % hostname)
+
+    peerstr = hostname + '.onion'
+
     try:
         authkey = config.get('onion', 'clientauth')
         if authkey:
             print ("Client auth is %s" % authkey)
+            peerstr = '%s@%s.onion' % (authkey, hostname)
     except (KeyError, cp.NoOptionError) as e:
-        print ("No client auth")
+        print ("No client authentication required, repo will be public.")
+
     print ("Git server local port is %d" % localport)
-    print ("You can now hand out this onion to prospective peers.")
+    print ("You can now hand out the onion %s to prospective peers." % color.bold(peerstr))
     print ("It will be re-used anytime Globalist starts in this directory.")
 
     what = "repo"
@@ -101,54 +109,67 @@ def run_server(config, localport = 9418):
                      os.path.abspath(what)])
     output = gitdaemon.communicate()[0]
     print (output)
-    # then background this process
 
 def makeonion(controller, config, options):
-    # stem docs say: provide the password here if you set one:
-    controller.authenticate()
-    # todo catch UnreadableCookieFile(
+
+    try:
+        controller.authenticate()
+    except Exception as e:
+        print ("Error: %s" % e)
 
     onion = None
 
     extra_kwargs = {}
     
     if config.has_section('onion'):
-        print ("Attempting to use saved onion identity")
+        print ("Attempting to use saved onion identity.")
         (keytype,key) = config.get('onion', 'key').split(':',1)
 
         if options.o_auth:
             try:
-                print ("Attempting to use saved clientauth")
+                print ("Attempting to use saved clientauth.")
                 extra_kwargs['basic_auth'] =\
                 dict([config.get('onion', 'clientauth').split(':',1)])
             except (KeyError, cp.NoOptionError) as e:
-                print ("No client auth present, generating one")
+                print ("No client auth key found, generating one")
                 extra_kwargs['basic_auth'] = {'somebody': None}
         else:
-            print ("Not using clientauth.")
+            try:
+                extra_kwargs['basic_auth'] =\
+                dict([config.get('onion', 'clientauth').split(':',1)])
+                print ("Client auth key found, using it.")
+            except (KeyError, cp.NoOptionError) as e:
+                print ("Not using client auth.")
+
+        if options.o_ap:
+            print ("Waiting for onion to be published.")
 
         onion = controller.create_ephemeral_hidden_service(**extra_kwargs, ports={9418: options.a_localport}, discard_key=True, await_publication=options.o_ap, key_type=keytype, key_content=key)
 
     else:
-        print ("I'm afraid we don't have an identity yet, creating one")
+        print ("I'm afraid we don't have an identity yet, creating one.")
 
         if options.o_auth:
             extra_kwargs['basic_auth'] = {'somebody': None}
 
+        if options.o_ap:
+            print ("Waiting for onion to be published.")
+
         onion = controller.create_ephemeral_hidden_service(**extra_kwargs, ports={9418: options.a_localport}, discard_key=False, await_publication=options.o_ap)
 
-#    print (onion)
-
-    print ("Tor controller says Onion OK")
+    print ("Onion OK.")
 
     if not onion.is_ok():
         raise Exception('Failed to publish onion.')
     else:
+
         # perhaps avoid overwriting when already present?
         for line in onion:
+
             if line != "OK":
                 k, v = line.split('=', 1)
-                # we only request the key if the service is new
+
+                # Request the key only if the service is new:
                 if k == "PrivateKey":
                     try:
                         config.add_section('onion')
@@ -177,7 +198,6 @@ def set_client_authentications(ls):
     controller = Controller.from_port(port = options.a_controlport)
     controller.authenticate()
     # is there no sane way to _append_ a multi-config option in Tor????
-    # control protocol badly misdesigned, nobody thought of concurrent access???!?
     controller.set_caching(False)
 
 # except it doesn't work, the 650 message never arrives. why?
@@ -239,7 +259,9 @@ def clone(config):
 
     # FIXME: when the first fails, we should move on to the next..
 
-    what  = "git://%s.onion/repo" % peers[0]
+    theonion = peers[0]
+
+    what  = "git://%s.onion/repo" % theonion
     where = "repo"
     how   = []
 
@@ -255,16 +277,13 @@ def clone(config):
     else:
         make_exportable(where)
 
-    # Make a local editable repo
-    git(["clone", "repo.git", "repo"]).wait()
+    print("Adding remote mirror %s" % theonion)
+    proc_setMirror = subprocess.Popen(["torsocks", "-P", STATUS['socksport'], "git", "-C", os.path.abspath(where), "remote", "add", "--mirror=fetch", theonion, what])
+    proc_setMirror.wait()
 
-    processes = []
-    for peer in peers[1:]:
-        processes.append([peer, subprocess.Popen(["torsocks", "-P", STATUS['socksport'], "git", "-C", os.path.abspath("repo"), "pull", "git://%s.onion/repo" % peer])])
-        
-    for (peer,proc) in processes:
-        if proc.wait() != 0:
-            print ("Error with %s" % peer)
+    # Make a local editable repo
+    if OPTIONS.o_bare:
+        git(["clone", "repo.git", "repo"]).wait()
 
 def pull(config):
     peers = getpeers(config)
@@ -273,6 +292,12 @@ def pull(config):
 
     processes = []
     for peer in peers:
+        what  = "git://%s.onion/repo.git" % peer
+        where = "repo"
+        print("Adding remote mirror %s" % peer)
+        proc_setMirror = subprocess.Popen(["torsocks", "-P", STATUS['socksport'], "git", "-C", os.path.abspath("repo.git"), "remote", "add", "--mirror=fetch", peer, what])
+        proc_setMirror.wait()
+
         processes.append([peer, subprocess.Popen(["torsocks", "-P", STATUS['socksport'], "git", "-C", os.path.abspath("repo"), "pull", "git://%s.onion/repo" % peer])])
         
     for (peer,proc) in processes:
@@ -284,7 +309,14 @@ def fetch(config):
     print ("Fetching from %s" % peers)
     processes = []
     for peer in peers:
-        processes.append([peer, subprocess.Popen(["torsocks", "-P", STATUS['socksport'], "git", "-C", os.path.abspath("repo.git"), "fetch", "git://%s.onion/repo.git" % peer, 'origin'])])
+
+        what  = "git://%s.onion/repo.git" % peer
+        where = "repo.git"
+        print("Adding remote mirror %s" % peer)
+        proc_setMirror = subprocess.Popen(["torsocks", "-P", STATUS['socksport'], "git", "-C", os.path.abspath("repo.git"), "remote", "add", "--mirror=fetch", peer, what])
+        proc_setMirror.wait()
+
+        processes.append([peer, subprocess.Popen(["torsocks", "-P", STATUS['socksport'], "git", "-C", os.path.abspath("repo.git"), "fetch", peer])])
 # +refs/heads/*:refs/remotes/origin/*'])])
 
     for (peer,proc) in processes:
@@ -299,7 +331,7 @@ def init(config):
 
     if options.o_bare:
         git(["init", "repo.git", "--bare"]).wait()
-        # Make a local editable repo
+        # Make a local editable repo:
         git(["clone", "repo.git", "repo"]).wait()
 
     else:
@@ -318,7 +350,7 @@ def main(args=[]):
                    default=False, help="make new empty repo")
 
     opt.add_option("-b", "--bare", dest="o_bare", action="store_true",
-                   default=False, help="use bare repos and fetch, not pull")
+                   default=False, help="use bare repos and fetch, not pull (recommended)")
 
     opt.add_option("-c", "--clone", dest="o_clone", action="store_true",
                    default=False, help="clone repo from 1st peer")
@@ -339,11 +371,8 @@ def main(args=[]):
     opt.add_option("-a", "--await", dest="o_ap", action="store_true",
                    default=False, help="await publication of .onion in DHT before proceeding")
 
-    opt.add_option("-x", "--auth", action="store_true", default=True,
+    opt.add_option("-x", "--auth", action="store_true", default=False,
                    dest="o_auth", help="enable authentication (private)")
-
-    opt.add_option("-X", "--no-auth", action="store_false", default=True,
-                   dest="o_auth", help="disable authentication (not private)")
 
     (options, args) = opt.parse_args(args)
 
@@ -355,16 +384,22 @@ def main(args=[]):
         return 0
 
     if options.o_auth and stem.__version__ < '1.5.0':
-        sys.stderr.write ("stem version >=1.5.0 required for auth\n")
+        sys.stderr.write ("Error: stem version >=1.5.0 required for auth\n")
         return 1
 
     if not options.a_controlport:
         options.a_controlport = DEFAULT_CONTROLPORT
 
+    print(color.gold('This is Globalist V%s') % __version__)
+
     # Extract socksport via c.get_conf and use this (-P in torsocks)
     controller = Controller.from_port(port = options.a_controlport)
     controller.authenticate()
-    STATUS['socksport'] = controller.get_conf('SocksPort').split(" ",1)[0]
+    try:
+        STATUS['socksport'] = controller.get_conf('SocksPort').split(" ",1)[0]
+    except AttributeError as e:
+        print("Error: tor controller present at %d but SocksPort not set." % options.a_controlport)
+        return 1
     controller.close()
 
     config = cp.ConfigParser()
@@ -446,10 +481,6 @@ def main(args=[]):
             threads.append(t)
             t.start()
 
-    # It's either pull(once) or serve. It's no problem running pull from
-    # another console while the server is up. It's no problem specifying
-    # periodic pull with either.
-
     if options.o_pull and not options.a_pull:
         if options.o_bare:
             fetch(config)
@@ -464,5 +495,3 @@ def main(args=[]):
 
     for t in threads:
         t.join()
-
-# TODO: should only generate a clientauth on a previously unauthenticated repo if requested by command line option
