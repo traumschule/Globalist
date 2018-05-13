@@ -93,20 +93,19 @@ def run_server(config, localport = 9418):
     print ("You can now hand out the onion %s to prospective peers." % color.bold(peerstr))
     print ("It will be re-used anytime Globalist starts in this directory.")
 
-    what = "repo"
+    where = os.path.join(OPTIONS.o_dir, "repo")
 
     if OPTIONS.o_bare:
-        make_exportable("repo.git")
-        what += ".git"
+        where += ".git"
+        make_exportable(where)
     else:
-        make_exportable(os.path.join("repo",".git"))
+        make_exportable(os.path.join(where, ".git"))
 
     gitdaemon = git(["daemon", "--base-path=%s" % os.path.abspath("."),
                      "--reuseaddr", "--verbose",
-    # there could be a global setting enabling write access??
                      "--disable=receive-pack",
                      "--listen=127.0.0.1", "--port=%d" % localport,
-                     os.path.abspath(what)])
+                     os.path.abspath(where)])
     output = gitdaemon.communicate()[0]
     print (output)
 
@@ -188,7 +187,7 @@ def makeonion(controller, config, options):
                     except cp.DuplicateSectionError as e:
                         pass
                     config.set('onion', 'clientauth', v)
-            config.write(open('repo.cfg', 'w'))
+            config.write(open(os.path.join(OPTIONS.o_dir, 'repo.cfg'), 'w'))
 
 
 def set_client_authentications(ls):
@@ -262,7 +261,7 @@ def clone(config):
     theonion = peers[0]
 
     what  = "git://%s.onion/repo" % theonion
-    where = "repo"
+    where = os.path.join(OPTIONS.o_dir, "repo")
     how   = []
 
     if OPTIONS.o_bare:
@@ -283,7 +282,8 @@ def clone(config):
 
     # Make a local editable repo
     if OPTIONS.o_bare:
-        git(["clone", "repo.git", "repo"]).wait()
+        git(["clone", os.path.join(OPTIONS.o_dir, "repo.git"),
+                      os.path.join(OPTIONS.o_dir, "repo")]).wait()
 
 def pull(config):
     peers = getpeers(config)
@@ -293,12 +293,12 @@ def pull(config):
     processes = []
     for peer in peers:
         what  = "git://%s.onion/repo.git" % peer
-        where = "repo"
+
         print("Adding remote mirror %s" % peer)
-        proc_setMirror = subprocess.Popen(["torsocks", "-P", STATUS['socksport'], "git", "-C", os.path.abspath("repo.git"), "remote", "add", "--mirror=fetch", peer, what])
+        proc_setMirror = subprocess.Popen(["torsocks", "-P", STATUS['socksport'], "git", "-C", os.path.abspath(os.path.join(OPTIONS.o_dir, "repo")), "remote", "add", "--mirror=fetch", peer, what])
         proc_setMirror.wait()
 
-        processes.append([peer, subprocess.Popen(["torsocks", "-P", STATUS['socksport'], "git", "-C", os.path.abspath("repo"), "pull", "git://%s.onion/repo" % peer])])
+        processes.append([peer, subprocess.Popen(["torsocks", "-P", STATUS['socksport'], "git", "-C", os.path.abspath(os.path.join(OPTIONS.o_dir, "repo")), "pull", "git://%s.onion/repo" % peer])])
         
     for (peer,proc) in processes:
         if proc.wait() != 0:
@@ -311,12 +311,12 @@ def fetch(config):
     for peer in peers:
 
         what  = "git://%s.onion/repo.git" % peer
-        where = "repo.git"
+
         print("Adding remote mirror %s" % peer)
-        proc_setMirror = subprocess.Popen(["torsocks", "-P", STATUS['socksport'], "git", "-C", os.path.abspath("repo.git"), "remote", "add", "--mirror=fetch", peer, what])
+        proc_setMirror = subprocess.Popen(["torsocks", "-P", STATUS['socksport'], "git", "-C", os.path.abspath(os.path.join(OPTIONS.o_dir, "repo.git")), "remote", "add", "--mirror=fetch", peer, what])
         proc_setMirror.wait()
 
-        processes.append([peer, subprocess.Popen(["torsocks", "-P", STATUS['socksport'], "git", "-C", os.path.abspath("repo.git"), "fetch", peer])])
+        processes.append([peer, subprocess.Popen(["torsocks", "-P", STATUS['socksport'], "git", "-C", os.path.abspath(os.path.join(OPTIONS.o_dir, "repo.git")), "fetch", peer])])
 # +refs/heads/*:refs/remotes/origin/*'])])
 
     for (peer,proc) in processes:
@@ -324,12 +324,9 @@ def fetch(config):
             print ("Error with %s" % peer)
 
 def init(config):
-    global OPTIONS # not needed for read access btw
-    options = OPTIONS
-
     print ("Initializing ...")
 
-    if options.o_bare:
+    if OPTIONS.o_bare:
         git(["init", "repo.git", "--bare"]).wait()
         # Make a local editable repo:
         git(["clone", "repo.git", "repo"]).wait()
@@ -374,10 +371,14 @@ def main(args=[]):
     opt.add_option("-x", "--auth", action="store_true", default=False,
                    dest="o_auth", help="enable authentication (private)")
 
+    opt.add_option('-d', "--dir", dest="o_dir", action="store", type="string", default=".", metavar="DIR", help="base directory")
+
     (options, args) = opt.parse_args(args)
 
     global OPTIONS
     OPTIONS = options
+
+    print(color.gold('This is Globalist V%s') % __version__)
 
     if options.o_version:
         print (__version__)
@@ -390,7 +391,9 @@ def main(args=[]):
     if not options.a_controlport:
         options.a_controlport = DEFAULT_CONTROLPORT
 
-    print(color.gold('This is Globalist V%s') % __version__)
+    if not os.path.isdir(options.o_dir):
+        sys.stderr.write ("Error: directory %s does not exist\n" % options.o_dir)
+        return 1
 
     # Extract socksport via c.get_conf and use this (-P in torsocks)
     controller = Controller.from_port(port = options.a_controlport)
@@ -405,13 +408,13 @@ def main(args=[]):
     config = cp.ConfigParser()
     cfgfile = None
     try:
-        cfgfile = open('repo.cfg')
+        cfgfile = open(os.path.join(options.o_dir, 'repo.cfg'), "r")
     except FileNotFoundError as e:
         print("Trying to make file repo.cfg")
         try:
-            os.mknod("repo.cfg")
-            os.chmod("repo.cfg", 0o600)
-            cfgfile = open('repo.cfg')
+            os.mknod(os.path.join(options.o_dir, 'repo.cfg'))
+            os.chmod(os.path.join(options.o_dir, 'repo.cfg'), 0o600)
+            cfgfile = open(os.path.join(options.o_dir, 'repo.cfg'))
         except Exception as e:
             print (e)
             return 1
@@ -419,7 +422,7 @@ def main(args=[]):
     config.readfp(cfgfile)
 
     try:
-        os.stat("repo.git")
+        os.stat(os.path.join(options.o_dir, "repo.git"))
         if not options.o_bare:
             print ("repo.git exists, setting -b implicitly")
             # TODO -B to override
@@ -431,7 +434,8 @@ def main(args=[]):
             return 1
 
     try:
-        os.stat("repo")
+        os.stat(os.path.join(options.o_dir, "repo"))
+
     except FileNotFoundError as e:
         if not options.o_init and not options.o_clone and not options.o_bare:
             print("./repo/ does not exist, try -i or -c")
