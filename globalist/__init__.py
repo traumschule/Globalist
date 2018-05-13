@@ -101,7 +101,7 @@ def run_server(config, localport = 9418):
     else:
         make_exportable(os.path.join(where, ".git"))
 
-    gitdaemon = git(["daemon", "--base-path=%s" % os.path.abspath("."),
+    gitdaemon = git(["daemon", "--base-path=%s" % os.path.abspath(OPTIONS.o_dir),
                      "--reuseaddr", "--verbose",
                      "--disable=receive-pack",
                      "--listen=127.0.0.1", "--port=%d" % localport,
@@ -327,12 +327,12 @@ def init(config):
     print ("Initializing ...")
 
     if OPTIONS.o_bare:
-        git(["init", "repo.git", "--bare"]).wait()
+        git(["init", os.path.join(OPTIONS.o_dir, "repo.git"), "--bare"]).wait()
         # Make a local editable repo:
-        git(["clone", "repo.git", "repo"]).wait()
+        git(["clone", os.path.join(OPTIONS.o_dir, "repo.git"), os.path.join(OPTIONS.o_dir, "repo")]).wait()
 
     else:
-        git(["init", "repo"]).wait()
+        git(["init", os.path.join(OPTIONS.o_dir,"repo")]).wait()
 
     print ("Initialized")
 
