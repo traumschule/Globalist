@@ -9,6 +9,7 @@ import re
 import os
 import sys
 import json
+import datetime
 import subprocess
 
 import stem
@@ -69,8 +70,8 @@ class color:
     def bold(s):
         return color.BOLD + s + color.UNSET
 
-def git(command):
-    return subprocess.Popen(["git"] + command)
+def git(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE):
+    return subprocess.Popen(["git"] + command, stdout=stdout, stderr=stderr)
 
 def make_exportable(path):
     subprocess.Popen(["touch", os.path.abspath(os.path.join(path, "git-daemon-export-ok")) ]).wait()
@@ -106,8 +107,7 @@ def run_server(config, localport = 9418):
                      "--disable=receive-pack",
                      "--listen=127.0.0.1", "--port=%d" % localport,
                      os.path.abspath(where)])
-    output = gitdaemon.communicate()[0]
-    print (output)
+    gitdaemon.wait()
 
 def makeonion(controller, config, options):
 
@@ -260,16 +260,18 @@ def clone(config):
 
     theonion = peers[0]
 
-    what  = "git://%s.onion/repo" % theonion
+    remote_repo_uri  = "git://%s.onion/repo" % theonion
     where = os.path.join(OPTIONS.o_dir, "repo")
     how   = []
 
     if OPTIONS.o_bare:
-        what  += ".git"
+        remote_repo_uri += ".git"
         where += ".git"
         how   = ["--bare", "--mirror"]
 
-    cloneproc = subprocess.Popen(["torsocks", "-P", STATUS['socksport'], "git", "clone"] + how + [what, where])
+    print("Cloning from %s" % remote_repo_uri)
+
+    cloneproc = subprocess.Popen(["torsocks", "-P", STATUS['socksport'], "git", "clone"] + how + [remote_repo_uri, where])
     if cloneproc.wait() != 0:
         print ("Error cloning, exiting.")
         return -1
@@ -277,8 +279,9 @@ def clone(config):
         make_exportable(where)
 
     print("Adding remote mirror %s" % theonion)
-    proc_setMirror = subprocess.Popen(["torsocks", "-P", STATUS['socksport'], "git", "-C", os.path.abspath(where), "remote", "add", "--mirror=fetch", theonion, what])
+    proc_setMirror = subprocess.Popen(["torsocks", "-P", STATUS['socksport'], "git", "-C", os.path.abspath(where), "remote", "add", "--mirror=fetch", theonion, remote_repo_uri], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     proc_setMirror.wait()
+    # ("fatal: remote xxx already exists" is expected)
 
     # Make a local editable repo
     if OPTIONS.o_bare:
@@ -292,36 +295,41 @@ def pull(config):
 
     processes = []
     for peer in peers:
-        what  = "git://%s.onion/repo.git" % peer
+        remote_repo_uri  = "git://%s.onion/repo.git" % peer
 
-        print("Adding remote mirror %s" % peer)
-        proc_setMirror = subprocess.Popen(["torsocks", "-P", STATUS['socksport'], "git", "-C", os.path.abspath(os.path.join(OPTIONS.o_dir, "repo")), "remote", "add", "--mirror=fetch", peer, what])
+        proc_setMirror = subprocess.Popen(["torsocks", "-P", STATUS['socksport'], "git", "-C", os.path.abspath(os.path.join(OPTIONS.o_dir, "repo")), "remote", "add", "--mirror=fetch", peer, remote_repo_uri], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         proc_setMirror.wait()
+        # ("fatal: remote xxx already exists" is expected)
 
-        processes.append([peer, subprocess.Popen(["torsocks", "-P", STATUS['socksport'], "git", "-C", os.path.abspath(os.path.join(OPTIONS.o_dir, "repo")), "pull", "git://%s.onion/repo" % peer])])
-        
-    for (peer,proc) in processes:
-        if proc.wait() != 0:
-            print ("Error with %s" % peer)
+        processes.append([peer, subprocess.Popen(["torsocks", "-P", STATUS['socksport'], "git", "-C", os.path.abspath(os.path.join(OPTIONS.o_dir, "repo")), "pull", "git://%s.onion/repo" % peer], stdout=subprocess.PIPE, stderr=subprocess.PIPE)])
+
+    for (peer, proc) in processes:
+        so, se = proc.communicate()
+        if proc.returncode != 0:
+            print ("Error pulling from %s." % peer)
+        else:
+            print ("Pull from %s successful." % peer)
 
 def fetch(config):
     peers = getpeers(config)
-    print ("Fetching from %s" % peers)
+    print ("Fetching from %s at %s" % (peers, datetime.datetime.now().strftime("%H:%M:%S")))
     processes = []
     for peer in peers:
 
-        what  = "git://%s.onion/repo.git" % peer
+        remote_repo_uri = "git://%s.onion/repo.git" % peer
 
-        print("Adding remote mirror %s" % peer)
-        proc_setMirror = subprocess.Popen(["torsocks", "-P", STATUS['socksport'], "git", "-C", os.path.abspath(os.path.join(OPTIONS.o_dir, "repo.git")), "remote", "add", "--mirror=fetch", peer, what])
+        proc_setMirror = subprocess.Popen(["torsocks", "-P", STATUS['socksport'], "git", "-C", os.path.abspath(os.path.join(OPTIONS.o_dir, "repo.git")), "remote", "add", "--mirror=fetch", peer, remote_repo_uri], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         proc_setMirror.wait()
 
-        processes.append([peer, subprocess.Popen(["torsocks", "-P", STATUS['socksport'], "git", "-C", os.path.abspath(os.path.join(OPTIONS.o_dir, "repo.git")), "fetch", peer])])
+        processes.append([peer, subprocess.Popen(["torsocks", "-P", STATUS['socksport'], "git", "-C", os.path.abspath(os.path.join(OPTIONS.o_dir, "repo.git")), "fetch", peer], stdout=subprocess.PIPE, stderr=subprocess.PIPE)])
 # +refs/heads/*:refs/remotes/origin/*'])])
 
-    for (peer,proc) in processes:
-        if proc.wait() != 0:
-            print ("Error with %s" % peer)
+    for (peer, proc) in processes:
+        so, se = proc.communicate()
+        if proc.returncode != 0:
+            print ("Error fetching from %s." % peer)
+        else:
+            print ("Fetch from %s successful." % peer)
 
 def init(config):
     print ("Initializing ...")
@@ -346,8 +354,8 @@ def main(args=[]):
     opt.add_option("-i", "--init", dest="o_init", action="store_true",
                    default=False, help="make new empty repo")
 
-    opt.add_option("-b", "--bare", dest="o_bare", action="store_true",
-                   default=False, help="use bare repos and fetch, not pull (recommended)")
+    opt.add_option("-B", "--non-bare", dest="o_bare", action="store_false",
+                   default=True, help="use non-bare repo directly and pull, not fetch (not recommended)")
 
     opt.add_option("-c", "--clone", dest="o_clone", action="store_true",
                    default=False, help="clone repo from 1st peer")
