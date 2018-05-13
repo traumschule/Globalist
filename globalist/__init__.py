@@ -70,8 +70,8 @@ class color:
     def bold(s):
         return color.BOLD + s + color.UNSET
 
-def git(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE):
-    return subprocess.Popen(["git"] + command, stdout=stdout, stderr=stderr)
+def git(command, extra_kwargs={}):
+    return subprocess.Popen(["git"] + command, **extra_kwargs)
 
 def make_exportable(path):
     subprocess.Popen(["touch", os.path.abspath(os.path.join(path, "git-daemon-export-ok")) ]).wait()
@@ -322,7 +322,6 @@ def fetch(config):
         proc_setMirror.wait()
 
         processes.append([peer, subprocess.Popen(["torsocks", "-P", STATUS['socksport'], "git", "-C", os.path.abspath(os.path.join(OPTIONS.o_dir, "repo.git")), "fetch", peer], stdout=subprocess.PIPE, stderr=subprocess.PIPE)])
-# +refs/heads/*:refs/remotes/origin/*'])])
 
     for (peer, proc) in processes:
         so, se = proc.communicate()
